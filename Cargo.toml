@@ -6,5 +6,7 @@ description = "ReDoS (catastrophic-backtracking) regex safety check"
 license = "MIT"
 repository = "https://github.com/hey-jj/safe-regex-rs"
 readme = "README.md"
+keywords = ["regex", "redos", "security", "backtracking", "safety"]
+categories = ["text-processing", "algorithms"]
 
 [dependencies]
