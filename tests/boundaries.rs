@@ -74,3 +74,64 @@ fn bounded_quantifiers_count_like_unbounded() {
     // A single {0} is height 1, safe.
     assert!(safe_regex("a{0}", Options::default()));
 }
+
+#[test]
+fn brace_range_lower_above_upper_is_unsafe() {
+    // `{n,m}` with n > m is a syntax error in ECMAScript, so it reads unsafe.
+    assert!(!safe_regex("x{2,1}", Options::default()));
+    assert!(!safe_regex("a{5,3}", Options::default()));
+    // Equal and ascending bounds stay valid and safe.
+    assert!(safe_regex("x{5,10}", Options::default()));
+    assert!(safe_regex("a{3,5}", Options::default()));
+    assert!(safe_regex("a{3,3}", Options::default()));
+}
+
+#[test]
+fn leading_brace_quantifier_is_unsafe() {
+    // A well-formed brace quantifier with no atom to bind is a syntax error.
+    assert!(!safe_regex("{2}", Options::default()));
+    assert!(!safe_regex("{2,}", Options::default()));
+    assert!(!safe_regex("{2,3}", Options::default()));
+    // A malformed brace stays a literal and is safe.
+    assert!(safe_regex("{", Options::default()));
+    assert!(safe_regex("a{", Options::default()));
+    assert!(safe_regex("a{}b", Options::default()));
+}
+
+#[test]
+fn quantifier_on_zero_width_assertion_is_unsafe() {
+    // Anchors and word boundaries cannot take a quantifier.
+    assert!(!safe_regex("^*", Options::default()));
+    assert!(!safe_regex("$+", Options::default()));
+    assert!(!safe_regex(r"\b*", Options::default()));
+    assert!(!safe_regex(r"\B?", Options::default()));
+    assert!(!safe_regex(r"\b{2}", Options::default()));
+    // A lookbehind is zero-width too.
+    assert!(!safe_regex("(?<=a)*", Options::default()));
+    // A lookahead is quantifiable without the unicode flag.
+    assert!(safe_regex("(?=a)*", Options::default()));
+}
+
+#[test]
+fn stacked_quantifier_is_unsafe() {
+    // A second quantifier on the same atom is a syntax error.
+    assert!(!safe_regex("a*{2}", Options::default()));
+    assert!(!safe_regex("x{5}{2}", Options::default()));
+    assert!(!safe_regex("a{2}{3}", Options::default()));
+    assert!(!safe_regex("a+?*", Options::default()));
+    // A lazy marker on a single quantifier is not a stack.
+    assert!(safe_regex("a*?", Options::default()));
+    assert!(safe_regex("a{2,3}?", Options::default()));
+}
+
+#[test]
+fn empty_character_class_is_safe() {
+    // `[]` matches nothing and `[^]` matches anything. Both are valid and safe.
+    assert!(safe_regex("[]", Options::default()));
+    assert!(safe_regex("[^]", Options::default()));
+    assert!(safe_regex("a[]b", Options::default()));
+    // A `]` after a member is still a literal close.
+    assert!(safe_regex("[a]", Options::default()));
+    // `[]]` is an empty class then a literal `]`.
+    assert!(safe_regex("[]]", Options::default()));
+}

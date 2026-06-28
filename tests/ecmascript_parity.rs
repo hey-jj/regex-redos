@@ -9,19 +9,17 @@
 //! The expected column is the result of `new RegExp(pattern)` followed by the
 //! two heuristics, computed with a JavaScript engine. It is the ground truth.
 //!
-//! Two groups split by current status.
+//! Three groups, one per parsing rule.
 //!
-//! - [`literal_and_lookahead_edges`] passes today. Malformed braces stay
-//!   literal, and a quantified lookahead is valid without the `u` flag. These
-//!   guard against regressions in the lenient direction.
-//! - [`invalid_syntax_must_be_unsafe`] and [`empty_class_is_safe`] fail today.
-//!   They are marked `#[ignore]` and document four known parser gaps. Remove the
-//!   ignore once the parser rejects these forms (or accepts the empty class).
-//!   The four gaps:
-//!   - quantifiers on anchors and stacked quantifiers
-//!   - empty class `[]` and `[^]` wrongly rejected
-//!   - brace range `{n,m}` with `n > m` wrongly accepted
-//!   - a leading well-formed quantifier `{2}` read as literal
+//! - [`literal_and_lookahead_edges`] guards the lenient direction. Malformed
+//!   braces stay literal, and a quantified lookahead is valid without the `u`
+//!   flag.
+//! - [`invalid_syntax_must_be_unsafe`] pins the four families the engine
+//!   rejects: quantifiers on anchors or word boundaries, stacked quantifiers,
+//!   a brace range `{n,m}` with `n > m`, and a leading well-formed quantifier
+//!   `{2}` with no atom to bind.
+//! - [`empty_class_is_safe`] pins the empty class `[]` and the negated empty
+//!   class `[^]`, both valid and safe.
 
 use safe_regex_rs::{safe_regex, Options};
 
@@ -95,7 +93,6 @@ fn literal_and_lookahead_edges() {
 }
 
 #[test]
-#[ignore = "known parser gaps: invalid ECMAScript reported safe (see build tracking)"]
 fn invalid_syntax_must_be_unsafe() {
     // Every pattern here throws in `new RegExp`, so the engine path returns
     // false. The current parser accepts them and returns true.
@@ -202,7 +199,6 @@ fn invalid_syntax_must_be_unsafe() {
 }
 
 #[test]
-#[ignore = "known parser gap: empty class [] and [^] wrongly rejected (see build tracking)"]
 fn empty_class_is_safe() {
     // `[]` matches nothing and `[^]` matches anything. Both are valid
     // ECMAScript and safe. The current parser rejects them.

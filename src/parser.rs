@@ -106,26 +106,42 @@ impl Parser {
 
     /// `Term :: Atom Quantifier?`
     ///
-    /// A quantifier turns the atom into a [`Node::Repetition`].
+    /// A quantifier turns the atom into a [`Node::Repetition`]. ECMAScript
+    /// forbids three things this guards against. A quantifier cannot apply to a
+    /// zero-width assertion such as `^`, `$`, `\b`, `\B`, or a lookbehind. A
+    /// brace range `{n,m}` with `n > m` is a syntax error. A second quantifier
+    /// cannot stack on a quantified atom, so `a*{2}` and `x{5}{2}` are errors.
+    /// Each case produces an [`Error`].
     fn parse_term(&mut self) -> Result<Node, Error> {
-        let atom = self.parse_atom()?;
-        if self.at_quantifier() {
-            self.consume_quantifier()?;
-            Ok(Node::Repetition(Box::new(atom)))
-        } else {
-            Ok(atom)
+        let (atom, quant) = self.parse_atom()?;
+        let q = self.peek_quantifier();
+        if q == Quant::None {
+            return Ok(atom);
         }
+        if quant == Quantifiable::No || q == Quant::InvalidRange {
+            return Err(Error);
+        }
+        self.consume_quantifier()?;
+        // A second quantifier on the same atom is a syntax error. An invalid
+        // stacked range still occupies quantifier position, so it counts.
+        if self.peek_quantifier() != Quant::None {
+            return Err(Error);
+        }
+        Ok(Node::Repetition(Box::new(atom)))
     }
 
-    /// Does a quantifier start at the cursor?
+    /// Classify what sits at the cursor as a quantifier.
     ///
-    /// `*`, `+`, `?` always qualify. `{` qualifies only when it forms a valid
-    /// `{n}`, `{n,}`, or `{n,m}`. A lone `{` is a literal brace in ECMAScript.
-    fn at_quantifier(&self) -> bool {
+    /// `*`, `+`, `?` are always quantifiers. A brace is a quantifier only when
+    /// it has the shape `{n}`, `{n,}`, or `{n,m}` with digit-run bounds. Such a
+    /// brace is [`Quant::InvalidRange`] when it is `{n,m}` with `n > m`, which
+    /// is a syntax error rather than a literal. A brace that is not a quantifier
+    /// shape, such as `{` or `{a}`, is a literal and reports [`Quant::None`].
+    fn peek_quantifier(&self) -> Quant {
         match self.peek() {
-            Some('*') | Some('+') | Some('?') => true,
-            Some('{') => self.brace_quantifier_len().is_some(),
-            _ => false,
+            Some('*') | Some('+') | Some('?') => Quant::Symbol,
+            Some('{') => self.brace_quantifier(),
+            _ => Quant::None,
         }
     }
 
@@ -136,7 +152,10 @@ impl Parser {
                 self.bump();
             }
             Some('{') => {
-                let len = self.brace_quantifier_len().ok_or(Error)?;
+                let len = match self.brace_quantifier() {
+                    Quant::Range(len) => len,
+                    _ => return Err(Error),
+                };
                 for _ in 0..len {
                     self.bump();
                 }
@@ -150,36 +169,58 @@ impl Parser {
         Ok(())
     }
 
-    /// If a valid brace quantifier starts at the cursor, return its length in
-    /// characters including the braces. Otherwise return `None`.
+    /// Classify a brace starting at the cursor.
     ///
-    /// Valid forms: `{n}`, `{n,}`, `{n,m}` with `n` and `m` being digit runs.
-    /// For `{n,m}` the bounds may be any digits. ECMAScript does not require
-    /// `n <= m` at parse time, so neither do we.
-    fn brace_quantifier_len(&self) -> Option<usize> {
+    /// Valid quantifier forms: `{n}`, `{n,}`, `{n,m}` with `n` and `m` being
+    /// digit runs. `{n,m}` with `n > m` is [`Quant::InvalidRange`], a syntax
+    /// error. Anything else is [`Quant::None`], a literal brace. Bounds parse
+    /// with saturating arithmetic, so a very long digit run never overflows.
+    fn brace_quantifier(&self) -> Quant {
         if self.peek() != Some('{') {
-            return None;
+            return Quant::None;
         }
         let mut i = 1;
         let first_len = self.digit_run(i);
         if first_len == 0 {
-            return None;
+            return Quant::None;
         }
+        let lower = self.parse_bound(i, first_len);
         i += first_len;
         match self.peek_at(i) {
-            Some('}') => Some(i + 1),
+            Some('}') => Quant::Range(i + 1),
             Some(',') => {
                 i += 1;
                 let second_len = self.digit_run(i);
+                let upper = self.parse_bound(i, second_len);
                 i += second_len;
-                if self.peek_at(i) == Some('}') {
-                    Some(i + 1)
-                } else {
-                    None
+                if self.peek_at(i) != Some('}') {
+                    return Quant::None;
                 }
+                // An explicit upper bound below the lower bound is a syntax
+                // error. An omitted upper bound (`{n,}`) has no ceiling.
+                if second_len > 0 && upper < lower {
+                    return Quant::InvalidRange;
+                }
+                Quant::Range(i + 1)
             }
-            _ => None,
+            _ => Quant::None,
         }
+    }
+
+    /// Read a digit run of `len` characters at `offset` from the cursor as a
+    /// number. Saturates at `u64::MAX` so an enormous bound never overflows.
+    /// The exact value past saturation does not change quantifier validity,
+    /// since both bounds saturate to the same ceiling.
+    fn parse_bound(&self, offset: usize, len: usize) -> u64 {
+        let mut value: u64 = 0;
+        for k in 0..len {
+            let digit = self
+                .peek_at(offset + k)
+                .and_then(|c| c.to_digit(10))
+                .unwrap_or(0);
+            value = value.saturating_mul(10).saturating_add(u64::from(digit));
+        }
+        value
     }
 
     /// Count consecutive ASCII digits starting at `offset` from the cursor.
@@ -191,21 +232,37 @@ impl Parser {
         n
     }
 
+    /// Parse one atom and report whether a quantifier may follow it.
+    ///
     /// `Atom :: '.' | '\' escape | '[' class ']' | '(' group ')' | anchor | char`
-    fn parse_atom(&mut self) -> Result<Node, Error> {
+    ///
+    /// Most atoms accept a quantifier. The exceptions are zero-width assertions:
+    /// the anchors `^` and `$`, the word boundaries `\b` and `\B`, and a
+    /// lookbehind. A lookahead does accept a quantifier without the `u` flag, so
+    /// it stays [`Quantifiable::Yes`].
+    fn parse_atom(&mut self) -> Result<(Node, Quantifiable), Error> {
         match self.peek() {
             Some('(') => self.parse_group(),
-            Some('[') => self.parse_class(),
+            Some('[') => Ok((self.parse_class()?, Quantifiable::Yes)),
             Some('\\') => self.parse_escape(),
             // A quantifier with nothing to bind to is invalid in ECMAScript.
+            // The brace forms `{n}`, `{n,}`, `{n,m}` are quantifiers too when
+            // well formed, so a leading one is an error. A malformed brace such
+            // as `{` or `a{` stays a literal and is handled below.
             Some('*') | Some('+') | Some('?') => Err(Error),
+            Some('{') if self.brace_quantifier() != Quant::None => Err(Error),
             // A stray close paren is handled by the caller. Reaching it here is
             // a bug, but treat it as the end of an atom run defensively.
             Some(')') => Err(Error),
-            Some(_) => {
-                // `^`, `$`, `.`, and any literal char are a single atom.
+            // Anchors are zero-width and cannot take a quantifier.
+            Some('^') | Some('$') => {
                 self.bump();
-                Ok(Node::Char)
+                Ok((Node::Char, Quantifiable::No))
+            }
+            Some(_) => {
+                // `.` and any literal char are a single quantifiable atom.
+                self.bump();
+                Ok((Node::Char, Quantifiable::Yes))
             }
             None => Err(Error),
         }
@@ -216,10 +273,15 @@ impl Parser {
     /// Handles capturing `(...)`, non-capturing `(?:...)`, named `(?<name>...)`,
     /// lookahead `(?=...)` `(?!...)`, and lookbehind `(?<=...)` `(?<!...)`.
     /// Rejects the atomic group `(?>...)` and any other unknown `(?` prefix.
-    fn parse_group(&mut self) -> Result<Node, Error> {
+    ///
+    /// A lookbehind is zero-width and cannot take a quantifier, so it returns
+    /// [`Quantifiable::No`]. Every other group, including a lookahead, may be
+    /// quantified.
+    fn parse_group(&mut self) -> Result<(Node, Quantifiable), Error> {
         // Consume '('.
         self.bump();
 
+        let mut quant = Quantifiable::Yes;
         if self.peek() == Some('?') {
             self.bump();
             match self.peek() {
@@ -232,6 +294,7 @@ impl Parser {
                     match self.peek() {
                         Some('=') | Some('!') => {
                             self.bump();
+                            quant = Quantifiable::No;
                         }
                         _ => self.consume_group_name()?,
                     }
@@ -246,7 +309,7 @@ impl Parser {
         if self.bump() != Some(')') {
             return Err(Error);
         }
-        Ok(Node::Group(Box::new(body)))
+        Ok((Node::Group(Box::new(body)), quant))
     }
 
     /// Consume a group name up to and including the closing `>`.
@@ -270,17 +333,14 @@ impl Parser {
 
     /// Parse a character class `[...]`, including a leading `^` and ranges.
     ///
-    /// A `]` immediately after `[` or `[^` is a literal member, matching
-    /// ECMAScript. Escapes inside the class are consumed as a unit so `\]`
-    /// does not close it. An unterminated class is an error.
+    /// In ECMAScript a `]` right after `[` or `[^` closes the class, so `[]`
+    /// matches nothing and `[^]` matches anything. Both are valid. Escapes
+    /// inside the class are consumed as a unit so `\]` does not close it. An
+    /// unterminated class is an error.
     fn parse_class(&mut self) -> Result<Node, Error> {
         // Consume '['.
         self.bump();
         if self.peek() == Some('^') {
-            self.bump();
-        }
-        // A literal ']' may appear first.
-        if self.peek() == Some(']') {
             self.bump();
         }
         loop {
@@ -304,18 +364,46 @@ impl Parser {
         }
     }
 
-    /// Parse an escape sequence starting at `\`.
+    /// Parse an escape sequence starting at `\` and report quantifiability.
     ///
     /// The cursor sits on `\`. ECMAScript requires a character after it. The
     /// value of the escape does not matter to the heuristics, so a backslash
-    /// plus one following character forms one atom. A trailing backslash with
-    /// nothing after it is an error.
-    fn parse_escape(&mut self) -> Result<Node, Error> {
+    /// plus one following character forms one atom. The word boundaries `\b`
+    /// and `\B` are zero-width assertions and cannot take a quantifier, so they
+    /// return [`Quantifiable::No`]. Every other escape may be quantified. A
+    /// trailing backslash with nothing after it is an error.
+    fn parse_escape(&mut self) -> Result<(Node, Quantifiable), Error> {
         // Consume '\'.
         self.bump();
-        if self.bump().is_none() {
-            return Err(Error);
+        match self.bump() {
+            None => Err(Error),
+            Some('b') | Some('B') => Ok((Node::Char, Quantifiable::No)),
+            Some(_) => Ok((Node::Char, Quantifiable::Yes)),
         }
-        Ok(Node::Char)
     }
+}
+
+/// Whether a quantifier may attach to an atom.
+///
+/// ECMAScript rejects a quantifier on a zero-width assertion: the anchors `^`
+/// and `$`, the word boundaries `\b` and `\B`, and a lookbehind. Those atoms
+/// are [`Quantifiable::No`]. A lookahead is quantifiable without the `u` flag,
+/// so it stays [`Quantifiable::Yes`] like ordinary atoms.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Quantifiable {
+    Yes,
+    No,
+}
+
+/// What sits at the cursor in quantifier position.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Quant {
+    /// No quantifier. A brace here is a literal.
+    None,
+    /// A `*`, `+`, or `?` quantifier.
+    Symbol,
+    /// A well-formed brace quantifier. Carries its length in characters.
+    Range(usize),
+    /// A brace range `{n,m}` with `n > m`. A syntax error, not a literal.
+    InvalidRange,
 }
