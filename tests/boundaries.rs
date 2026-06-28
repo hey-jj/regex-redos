@@ -16,7 +16,7 @@ fn default_limit_matches_explicit_25() {
     let over = "a?".repeat(26);
     assert_eq!(
         safe_regex(&over, Options::default()),
-        safe_regex(&over, Options { limit: 25 })
+        safe_regex(&over, Options::new(25))
     );
     assert!(!safe_regex(&over, Options::default()));
 
@@ -24,7 +24,7 @@ fn default_limit_matches_explicit_25() {
     let at = "a?".repeat(25);
     assert_eq!(
         safe_regex(&at, Options::default()),
-        safe_regex(&at, Options { limit: 25 })
+        safe_regex(&at, Options::new(25))
     );
     assert!(safe_regex(&at, Options::default()));
 }
@@ -41,7 +41,11 @@ fn limit_sweep_is_strict() {
         (11, true),
         (25, true),
     ] {
-        assert_eq!(safe_regex(&pat, Options { limit }), expect, "limit {limit}");
+        assert_eq!(
+            safe_regex(&pat, Options::new(limit)),
+            expect,
+            "limit {limit}"
+        );
     }
 }
 
@@ -62,9 +66,9 @@ fn empty_pattern_is_safe() {
 #[test]
 fn limit_zero_with_zero_reps_is_safe() {
     // Zero repetitions, limit zero. The strict comparison 0 > 0 is false.
-    assert!(safe_regex("abc", Options { limit: 0 }));
+    assert!(safe_regex("abc", Options::new(0)));
     // One repetition trips a zero limit.
-    assert!(!safe_regex("a*", Options { limit: 0 }));
+    assert!(!safe_regex("a*", Options::new(0)));
 }
 
 #[test]

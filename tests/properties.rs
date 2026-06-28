@@ -74,10 +74,10 @@ fn monotonic_in_limit() {
     ];
     for pat in &patterns {
         for limit in 0..40 {
-            if safe_regex(pat, Options { limit }) {
+            if safe_regex(pat, Options::new(limit)) {
                 for higher in limit..40 {
                     assert!(
-                        safe_regex(pat, Options { limit: higher }),
+                        safe_regex(pat, Options::new(higher)),
                         "pattern {pat:?} safe at {limit} but unsafe at {higher}"
                     );
                 }

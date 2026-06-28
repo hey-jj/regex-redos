@@ -11,15 +11,18 @@
 //! pattern as unsafe.
 
 /// A parse failure. The pattern is not a valid ECMAScript regular expression.
+///
+/// The type is internal. The public API maps a parse failure to a `false`
+/// safety verdict, so the cause never reaches a caller and carries no payload.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Error;
+pub(crate) struct Error;
 
 /// The reduced syntax tree.
 ///
 /// Only repetitions and grouping carry meaning for the heuristics. Everything
 /// else collapses into [`Node::Char`] or a list.
 #[derive(Debug)]
-pub enum Node {
+pub(crate) enum Node {
     /// An empty branch, for example the right side of `a|`.
     Empty,
     /// Any single consuming or zero-width atom that is not a group or
@@ -39,7 +42,7 @@ pub enum Node {
 /// Parse `pattern` into a [`Node`] tree.
 ///
 /// Returns [`Error`] when the pattern is not valid ECMAScript regex syntax.
-pub fn parse(pattern: &str) -> Result<Node, Error> {
+pub(crate) fn parse(pattern: &str) -> Result<Node, Error> {
     let chars: Vec<char> = pattern.chars().collect();
     let mut p = Parser { chars, pos: 0 };
     let node = p.parse_disjunction()?;

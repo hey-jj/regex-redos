@@ -50,6 +50,9 @@ pub const DEFAULT_LIMIT: usize = 25;
 /// Only [`limit`](Options::limit) is read. It bounds the total number of
 /// repetition nodes allowed in a pattern. The default is [`DEFAULT_LIMIT`].
 ///
+/// Build an `Options` with [`Options::new`] or [`Options::default`]. The struct
+/// is `#[non_exhaustive]`, so a new field can land without breaking callers.
+///
 /// # Examples
 ///
 /// ```
@@ -60,13 +63,29 @@ pub const DEFAULT_LIMIT: usize = 25;
 /// assert!(!safe_regex(&pattern, Options::default()));
 ///
 /// // Raising the limit makes it safe again.
-/// assert!(safe_regex(&pattern, Options { limit: 30 }));
+/// assert!(safe_regex(&pattern, Options::new(30)));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Options {
     /// Maximum allowed total repetitions. A pattern with strictly more than this
     /// many repetition nodes is unsafe.
     pub limit: usize,
+}
+
+impl Options {
+    /// Build options with an explicit repetition limit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use safe_regex_rs::{safe_regex, Options};
+    ///
+    /// assert!(safe_regex("a?".repeat(30).as_str(), Options::new(30)));
+    /// ```
+    pub fn new(limit: usize) -> Self {
+        Options { limit }
+    }
 }
 
 impl Default for Options {

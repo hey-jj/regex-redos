@@ -25,7 +25,7 @@ assert!(!is_safe("(x+x+)+y"));
 // Custom limit.
 let pattern = "a?".repeat(26);
 assert!(!safe_regex(&pattern, Options::default()));
-assert!(safe_regex(&pattern, Options { limit: 30 }));
+assert!(safe_regex(&pattern, Options::new(30)));
 ```
 
 ## What counts as a repetition
