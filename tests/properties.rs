@@ -4,7 +4,7 @@
 //! testing crate. A small linear congruential generator drives the random
 //! cases so failures reproduce.
 
-use safe_regex_rs::{safe_regex, Options};
+use redos_check::{safe_regex, Options};
 
 /// A tiny deterministic pseudo-random source. Same seed, same stream.
 struct Lcg(u64);

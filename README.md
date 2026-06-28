@@ -1,4 +1,4 @@
-# safe-regex-rs
+# redos-check
 
 Static heuristic detector for catastrophic-backtracking (ReDoS) regular
 expressions. Give it a pattern, get back a boolean. It never runs the regex.
@@ -16,7 +16,7 @@ Everything else is safe.
 ## Usage
 
 ```rust
-use safe_regex_rs::{safe_regex, is_safe, Options};
+use redos_check::{safe_regex, is_safe, Options};
 
 // Default limit of 25.
 assert!(is_safe("(beep|boop)*"));
@@ -50,7 +50,7 @@ for speed and a zero-execution guarantee.
 
 ```toml
 [dependencies]
-safe-regex-rs = "0.1"
+redos-check = "0.1"
 ```
 
 ## License

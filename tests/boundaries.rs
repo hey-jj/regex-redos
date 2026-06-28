@@ -2,7 +2,7 @@
 //!
 //! These pin behavior the canonical oracle exercises only implicitly.
 
-use safe_regex_rs::{safe_regex, Options, DEFAULT_LIMIT};
+use redos_check::{safe_regex, Options, DEFAULT_LIMIT};
 
 #[test]
 fn default_limit_is_25() {
