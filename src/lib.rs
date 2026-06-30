@@ -28,7 +28,7 @@
 //! # Examples
 //!
 //! ```
-//! use redos_check::{safe_regex, Options};
+//! use regex_redos::{safe_regex, Options};
 //!
 //! assert!(safe_regex("(beep|boop)*", Options::default()));
 //! assert!(!safe_regex("(x+x+)+y", Options::default()));
@@ -56,7 +56,7 @@ pub const DEFAULT_LIMIT: usize = 25;
 /// # Examples
 ///
 /// ```
-/// use redos_check::{safe_regex, Options};
+/// use regex_redos::{safe_regex, Options};
 ///
 /// // 26 repetitions trip the default limit of 25.
 /// let pattern = "a?".repeat(26);
@@ -79,7 +79,7 @@ impl Options {
     /// # Examples
     ///
     /// ```
-    /// use redos_check::{safe_regex, Options};
+    /// use regex_redos::{safe_regex, Options};
     ///
     /// assert!(safe_regex("a?".repeat(30).as_str(), Options::new(30)));
     /// ```
@@ -110,7 +110,7 @@ impl Default for Options {
 /// # Examples
 ///
 /// ```
-/// use redos_check::{safe_regex, Options};
+/// use regex_redos::{safe_regex, Options};
 ///
 /// assert!(safe_regex("^a+a+$", Options::default()));
 /// assert!(!safe_regex("(a*)*$", Options::default()));
@@ -141,7 +141,7 @@ pub fn safe_regex(re: &str, opts: Options) -> bool {
 /// # Examples
 ///
 /// ```
-/// use redos_check::is_safe;
+/// use regex_redos::is_safe;
 ///
 /// assert!(is_safe("(beep|boop)*"));
 /// assert!(!is_safe("(x+x+)+y"));

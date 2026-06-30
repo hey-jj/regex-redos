@@ -2,7 +2,7 @@
 //!
 //! The four behaviors shown in the crate documentation must hold exactly.
 
-use redos_check::{is_safe, safe_regex, Options};
+use regex_redos::{is_safe, safe_regex, Options};
 
 #[test]
 fn documented_examples() {

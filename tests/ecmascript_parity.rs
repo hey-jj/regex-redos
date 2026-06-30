@@ -21,7 +21,7 @@
 //! - [`empty_class_is_safe`] pins the empty class `[]` and the negated empty
 //!   class `[^]`, both valid and safe.
 
-use redos_check::{safe_regex, Options};
+use regex_redos::{safe_regex, Options};
 
 /// One row: a pattern and the engine-derived verdict.
 struct Row {
