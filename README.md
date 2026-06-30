@@ -13,6 +13,13 @@ The check parses a JavaScript-syntax pattern and applies two syntactic rules:
 If either rule fires, the pattern is unsafe. Unparseable input is unsafe.
 Everything else is safe.
 
+## When you need this
+
+This guards patterns run by a backtracking engine: JavaScript, PCRE, Python
+`re`, or `fancy-regex`. Rust's default `regex` crate matches in linear time and
+never backtracks, so a pattern that only runs through `regex` cannot suffer
+catastrophic backtracking and does not need this check.
+
 ## Usage
 
 ```rust
