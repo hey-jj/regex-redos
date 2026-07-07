@@ -139,3 +139,11 @@ fn empty_character_class_is_safe() {
     // `[]]` is an empty class then a literal `]`.
     assert!(safe_regex("[]]", Options::default()));
 }
+
+#[test]
+fn deeply_nested_groups_are_unsafe() {
+    // The parser must stop before recursive group parsing can exhaust the
+    // process stack.
+    let pattern = format!("{}a{}", "(".repeat(10_000), ")".repeat(10_000));
+    assert!(!safe_regex(&pattern, Options::default()));
+}

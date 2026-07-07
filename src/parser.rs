@@ -17,6 +17,13 @@
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Error;
 
+/// Maximum group nesting accepted by the recursive parser.
+///
+/// Patterns above this depth return [`Error`] before another recursive descent.
+/// Every accepted group tree stays within this limit, so later tree walks see
+/// bounded depth.
+const MAX_GROUP_NESTING: usize = 256;
+
 /// The reduced syntax tree.
 ///
 /// Only repetitions and grouping carry meaning for the heuristics. Everything
@@ -44,7 +51,11 @@ pub(crate) enum Node {
 /// Returns [`Error`] when the pattern is not valid ECMAScript regex syntax.
 pub(crate) fn parse(pattern: &str) -> Result<Node, Error> {
     let chars: Vec<char> = pattern.chars().collect();
-    let mut p = Parser { chars, pos: 0 };
+    let mut p = Parser {
+        chars,
+        pos: 0,
+        group_depth: 0,
+    };
     let node = p.parse_disjunction()?;
     if p.pos != p.chars.len() {
         // A leftover character means an unbalanced close paren or similar.
@@ -56,6 +67,7 @@ pub(crate) fn parse(pattern: &str) -> Result<Node, Error> {
 struct Parser {
     chars: Vec<char>,
     pos: usize,
+    group_depth: usize,
 }
 
 impl Parser {
@@ -284,6 +296,16 @@ impl Parser {
         // Consume '('.
         self.bump();
 
+        if self.group_depth >= MAX_GROUP_NESTING {
+            return Err(Error);
+        }
+        self.group_depth += 1;
+        let group = self.parse_group_body();
+        self.group_depth -= 1;
+        group
+    }
+
+    fn parse_group_body(&mut self) -> Result<(Node, Quantifiable), Error> {
         let mut quant = Quantifiable::Yes;
         if self.peek() == Some('?') {
             self.bump();
