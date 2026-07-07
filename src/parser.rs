@@ -10,6 +10,8 @@
 //! atomic group `(?>...)`, produce an [`Error`] so the caller can report the
 //! pattern as unsafe.
 
+use std::collections::HashSet;
+
 /// A parse failure. The pattern is not a valid ECMAScript regular expression.
 ///
 /// The type is internal. The public API maps a parse failure to a `false`
@@ -55,6 +57,7 @@ pub(crate) fn parse(pattern: &str) -> Result<Node, Error> {
         chars,
         pos: 0,
         group_depth: 0,
+        group_names: HashSet::new(),
     };
     let node = p.parse_disjunction()?;
     if p.pos != p.chars.len() {
@@ -68,6 +71,7 @@ struct Parser {
     chars: Vec<char>,
     pos: usize,
     group_depth: usize,
+    group_names: HashSet<String>,
 }
 
 impl Parser {
@@ -339,21 +343,92 @@ impl Parser {
 
     /// Consume a group name up to and including the closing `>`.
     ///
-    /// The name must be non-empty. The parser does not validate the identifier
-    /// character set beyond requiring at least one character before `>`.
+    /// The name must be a unique ECMAScript identifier name.
     fn consume_group_name(&mut self) -> Result<(), Error> {
-        let mut count = 0;
+        let mut name = String::new();
         loop {
-            match self.bump() {
+            match self.peek() {
                 Some('>') => break,
-                Some(_) => count += 1,
+                Some('\\') => name.push(self.consume_group_name_escape()?),
+                Some(c) => {
+                    self.bump();
+                    name.push(c);
+                }
                 None => return Err(Error),
             }
         }
-        if count == 0 {
+        if !is_group_name(&name) || !self.group_names.insert(name) {
             return Err(Error);
         }
+        self.bump();
         Ok(())
+    }
+
+    fn consume_group_name_escape(&mut self) -> Result<char, Error> {
+        if self.bump() != Some('\\') || self.bump() != Some('u') {
+            return Err(Error);
+        }
+        if self.peek() == Some('{') {
+            self.bump();
+            char::from_u32(self.consume_code_point_escape()?).ok_or(Error)
+        } else {
+            let value = self.consume_fixed_hex_value(4).ok_or(Error)?;
+            match value {
+                0xd800..=0xdbff => self.consume_trailing_surrogate_escape(value),
+                0xdc00..=0xdfff => Err(Error),
+                _ => char::from_u32(value).ok_or(Error),
+            }
+        }
+    }
+
+    fn consume_trailing_surrogate_escape(&mut self, lead: u32) -> Result<char, Error> {
+        if self.bump() != Some('\\') || self.bump() != Some('u') {
+            return Err(Error);
+        }
+        let trail = self.consume_fixed_hex_value(4).ok_or(Error)?;
+        if !(0xdc00..=0xdfff).contains(&trail) {
+            return Err(Error);
+        }
+        let code_point = 0x10000 + ((lead - 0xd800) << 10) + (trail - 0xdc00);
+        char::from_u32(code_point).ok_or(Error)
+    }
+
+    fn consume_code_point_escape(&mut self) -> Result<u32, Error> {
+        let mut value = 0u32;
+        let mut digits = 0usize;
+        loop {
+            match self.peek() {
+                Some('}') if digits > 0 => {
+                    self.bump();
+                    return Ok(value);
+                }
+                Some(c) if c.is_ascii_hexdigit() => {
+                    value = value
+                        .checked_mul(16)
+                        .and_then(|v| v.checked_add(c.to_digit(16).expect("hex digit")))
+                        .filter(|v| *v <= 0x10ffff)
+                        .ok_or(Error)?;
+                    digits += 1;
+                    self.bump();
+                }
+                _ => return Err(Error),
+            }
+        }
+    }
+
+    fn consume_fixed_hex_value(&mut self, len: usize) -> Option<u32> {
+        let mut value = 0u32;
+        for i in 0..len {
+            let c = self.peek_at(i)?;
+            if !c.is_ascii_hexdigit() {
+                return None;
+            }
+            value = value * 16 + c.to_digit(16).expect("hex digit");
+        }
+        for _ in 0..len {
+            self.bump();
+        }
+        Some(value)
     }
 
     /// Parse a character class `[...]`, including a leading `^` and ranges.
@@ -431,4 +506,23 @@ enum Quant {
     Range(usize),
     /// A brace range `{n,m}` with `n > m`. A syntax error, not a literal.
     InvalidRange,
+}
+
+fn is_group_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    is_group_name_start(first) && chars.all(is_group_name_continue)
+}
+
+fn is_group_name_start(c: char) -> bool {
+    c == '$' || c == '_' || unicode_id_start::is_id_start(c)
+}
+
+fn is_group_name_continue(c: char) -> bool {
+    is_group_name_start(c)
+        || unicode_id_start::is_id_continue(c)
+        || c == '\u{200c}'
+        || c == '\u{200d}'
 }

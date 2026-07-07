@@ -20,6 +20,9 @@
 //!   `{2}` with no atom to bind.
 //! - [`empty_class_is_safe`] pins the empty class `[]` and the negated empty
 //!   class `[^]`, both valid and safe.
+//! - [`invalid_named_capture_names_are_unsafe`] checks named capture syntax and
+//!   duplicate name rejection.
+//! - [`valid_named_capture_names_stay_safe`] checks accepted identifier names.
 
 use regex_redos::{safe_regex, Options};
 
@@ -233,6 +236,96 @@ fn empty_class_is_safe() {
         },
         Row {
             pat: "[^]{2,}",
+            expect: true,
+        },
+    ];
+    check(&rows);
+}
+
+#[test]
+fn invalid_named_capture_names_are_unsafe() {
+    let rows = [
+        Row {
+            pat: r"(?<1>a)",
+            expect: false,
+        },
+        Row {
+            pat: r"(?<a-b>a)",
+            expect: false,
+        },
+        Row {
+            pat: r"(?<a>a)(?<a>b)",
+            expect: false,
+        },
+        Row {
+            pat: r"(?<a>a)(?<\u0061>b)",
+            expect: false,
+        },
+        Row {
+            pat: r"(?<a>x)|(?<a>y)",
+            expect: false,
+        },
+        Row {
+            pat: r"(?<\u0345>a)",
+            expect: false,
+        },
+        Row {
+            pat: r"(?<\u200c>a)",
+            expect: false,
+        },
+        Row {
+            pat: r"(?<\uD800>a)",
+            expect: false,
+        },
+        Row {
+            pat: r"(?<\uDC00>a)",
+            expect: false,
+        },
+        Row {
+            pat: r"(?<\uD801>a)",
+            expect: false,
+        },
+    ];
+    check(&rows);
+}
+
+#[test]
+fn valid_named_capture_names_stay_safe() {
+    let rows = [
+        Row {
+            pat: r"(?<a\u203f>a)",
+            expect: true,
+        },
+        Row {
+            pat: r"(?<_a>a)",
+            expect: true,
+        },
+        Row {
+            pat: r"(?<$a>a)",
+            expect: true,
+        },
+        Row {
+            pat: r"(?<\u{61}>a)",
+            expect: true,
+        },
+        Row {
+            pat: "(?<\u{10400}>a)",
+            expect: true,
+        },
+        Row {
+            pat: r"(?<\u{10400}>a)",
+            expect: true,
+        },
+        Row {
+            pat: r"(?<a\u200c>a)",
+            expect: true,
+        },
+        Row {
+            pat: r"(?<a\u200d>a)",
+            expect: true,
+        },
+        Row {
+            pat: r"(?<\uD801\uDC00>a)",
             expect: true,
         },
     ];
