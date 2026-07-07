@@ -10,7 +10,7 @@
 //! atomic group `(?>...)`, produce an [`Error`] so the caller can report the
 //! pattern as unsafe.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 /// A parse failure. The pattern is not a valid ECMAScript regular expression.
 ///
@@ -435,33 +435,100 @@ impl Parser {
     ///
     /// In ECMAScript a `]` right after `[` or `[^` closes the class, so `[]`
     /// matches nothing and `[^]` matches anything. Both are valid. Escapes
-    /// inside the class are consumed as a unit so `\]` does not close it. An
-    /// unterminated class is an error.
+    /// inside the class are consumed as a unit, so `\]` does not close it. An
+    /// unterminated class is an error. A range with ordered code-unit endpoints
+    /// is valid. A reversed range is an error.
     fn parse_class(&mut self) -> Result<Node, Error> {
         // Consume '['.
         self.bump();
         if self.peek() == Some('^') {
             self.bump();
         }
+        let mut pending = VecDeque::new();
         loop {
-            match self.peek() {
-                None => return Err(Error),
-                Some(']') => {
-                    self.bump();
-                    return Ok(Node::Char);
+            if pending.is_empty() {
+                match self.peek() {
+                    None => return Err(Error),
+                    Some(']') => {
+                        self.bump();
+                        return Ok(Node::Char);
+                    }
+                    _ => {}
                 }
-                Some('\\') => {
-                    // Consume the backslash and the escaped character.
-                    self.bump();
-                    if self.bump().is_none() {
+            }
+            let start = self.consume_class_atom(&mut pending)?;
+            if pending.is_empty() && self.peek() == Some('-') && self.peek_at(1) != Some(']') {
+                // Consume '-'.
+                self.bump();
+                let end = self.consume_class_atom(&mut pending)?;
+                if let (ClassAtom::CodeUnit(start), ClassAtom::CodeUnit(end)) = (start, end) {
+                    if start > end {
                         return Err(Error);
                     }
                 }
-                Some(_) => {
-                    self.bump();
-                }
             }
         }
+    }
+
+    fn consume_class_atom(
+        &mut self,
+        pending: &mut VecDeque<ClassAtom>,
+    ) -> Result<ClassAtom, Error> {
+        if let Some(atom) = pending.pop_front() {
+            return Ok(atom);
+        }
+        match self.bump() {
+            None => Err(Error),
+            Some('\\') => self.consume_class_escape(pending),
+            Some(c) => Ok(queue_code_units(c, pending)),
+        }
+    }
+
+    fn consume_class_escape(
+        &mut self,
+        pending: &mut VecDeque<ClassAtom>,
+    ) -> Result<ClassAtom, Error> {
+        let c = self.bump().ok_or(Error)?;
+        match c {
+            'd' | 'D' | 's' | 'S' | 'w' | 'W' => Ok(ClassAtom::ClassEscape),
+            'b' => Ok(ClassAtom::CodeUnit(0x08)),
+            'f' => Ok(ClassAtom::CodeUnit(0x0c)),
+            'n' => Ok(ClassAtom::CodeUnit(0x0a)),
+            'r' => Ok(ClassAtom::CodeUnit(0x0d)),
+            't' => Ok(ClassAtom::CodeUnit(0x09)),
+            'v' => Ok(ClassAtom::CodeUnit(0x0b)),
+            'c' => match self.peek() {
+                Some(next) if next.is_ascii_alphanumeric() || next == '_' => {
+                    self.bump();
+                    Ok(ClassAtom::CodeUnit(u32::from(next) & 0x1f))
+                }
+                _ => {
+                    pending.push_back(ClassAtom::CodeUnit(u32::from('c')));
+                    Ok(ClassAtom::CodeUnit(u32::from('\\')))
+                }
+            },
+            'x' => Ok(ClassAtom::CodeUnit(
+                self.consume_fixed_hex_value(2).unwrap_or(u32::from('x')),
+            )),
+            'u' => Ok(ClassAtom::CodeUnit(
+                self.consume_fixed_hex_value(4).unwrap_or(u32::from('u')),
+            )),
+            '0'..='7' => Ok(ClassAtom::CodeUnit(self.consume_legacy_octal_escape(c))),
+            _ => Ok(ClassAtom::CodeUnit(u32::from(c))),
+        }
+    }
+
+    fn consume_legacy_octal_escape(&mut self, first: char) -> u32 {
+        let mut value = first.to_digit(8).expect("octal digit");
+        let max_len = if matches!(first, '0'..='3') { 3 } else { 2 };
+        for _ in 1..max_len {
+            let Some(next) = self.peek().and_then(|c| c.to_digit(8)) else {
+                break;
+            };
+            self.bump();
+            value = value * 8 + next;
+        }
+        value
     }
 
     /// Parse an escape sequence starting at `\` and report quantifiability.
@@ -506,6 +573,21 @@ enum Quant {
     Range(usize),
     /// A brace range `{n,m}` with `n > m`. A syntax error, not a literal.
     InvalidRange,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum ClassAtom {
+    CodeUnit(u32),
+    ClassEscape,
+}
+
+fn queue_code_units(c: char, pending: &mut VecDeque<ClassAtom>) -> ClassAtom {
+    let mut buf = [0; 2];
+    let units = c.encode_utf16(&mut buf);
+    if units.len() == 2 {
+        pending.push_back(ClassAtom::CodeUnit(u32::from(units[1])));
+    }
+    ClassAtom::CodeUnit(u32::from(units[0]))
 }
 
 fn is_group_name(name: &str) -> bool {

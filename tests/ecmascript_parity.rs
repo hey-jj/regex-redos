@@ -243,6 +243,188 @@ fn empty_class_is_safe() {
 }
 
 #[test]
+fn reversed_class_ranges_are_unsafe() {
+    let rows = [
+        Row {
+            pat: "[z-a]",
+            expect: false,
+        },
+        Row {
+            pat: r"[b-\x61]",
+            expect: false,
+        },
+        Row {
+            pat: r"[\x7a-a]",
+            expect: false,
+        },
+        Row {
+            pat: r"[b-\u0061]",
+            expect: false,
+        },
+        Row {
+            pat: r"[\u007a-a]",
+            expect: false,
+        },
+        Row {
+            pat: r"[z-\x]",
+            expect: false,
+        },
+        Row {
+            pat: r"[z-\u{61}]",
+            expect: false,
+        },
+        Row {
+            pat: r"[\u{7a}-a]",
+            expect: false,
+        },
+        Row {
+            pat: r"[z-\u{z}]",
+            expect: false,
+        },
+        Row {
+            pat: r"[\c1-\x10]",
+            expect: false,
+        },
+        Row {
+            pat: r"[\c-a]",
+            expect: false,
+        },
+        Row {
+            pat: r"[b-\c]",
+            expect: false,
+        },
+        Row {
+            pat: r"[z-\8]",
+            expect: false,
+        },
+        Row {
+            pat: r"[\x22-\41]",
+            expect: false,
+        },
+        Row {
+            pat: "[\u{1d49c}-\u{1d4b5}]",
+            expect: false,
+        },
+        Row {
+            pat: r"[a-\400]",
+            expect: false,
+        },
+        Row {
+            pat: r"[\377-\400]",
+            expect: false,
+        },
+    ];
+    check(&rows);
+}
+
+#[test]
+fn valid_class_range_edges_stay_safe() {
+    let rows = [
+        Row {
+            pat: r"[\w-a]",
+            expect: true,
+        },
+        Row {
+            pat: r"[a-z\d-_]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\n-a]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\t-a]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\u000a-a]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\x]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\x0]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\x1z]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\uz]",
+            expect: true,
+        },
+        Row {
+            pat: r"[a-\x]",
+            expect: true,
+        },
+        Row {
+            pat: r"[a-\u{7a}]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\c1-\x20]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\00-\07]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\8-a]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\11-\x20]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\1-\x05]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\uD800]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\uDC00]",
+            expect: true,
+        },
+        Row {
+            pat: r"[a-\uD800]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\uD800-\uDBFF]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\uDC00-\uDFFF]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\uD800\uDC00-\uDC01]",
+            expect: true,
+        },
+        Row {
+            pat: "[\u{1f600}-\\uDE01]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\400-a]",
+            expect: true,
+        },
+        Row {
+            pat: r"[\777-\778]",
+            expect: true,
+        },
+    ];
+    check(&rows);
+}
+
+#[test]
 fn invalid_named_capture_names_are_unsafe() {
     let rows = [
         Row {
